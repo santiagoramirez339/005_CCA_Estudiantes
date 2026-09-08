@@ -3,7 +3,7 @@
 **Universidad de Antioquia**  
 **Estudiante:** Santiago Ramírez Puentes  
 **Laboratorio:** 2  
-**Año:** 2026
+**Año:** 2026  
 
 ---
 
@@ -26,8 +26,11 @@ El objetivo del laboratorio es implementar una arquitectura de agentes capaz de 
 - realizar procesos de investigación;
 - utilizar herramientas externas cuando sea necesario;
 - interactuar con un modelo de lenguaje local;
+- sintetizar la información recuperada;
 - generar un reporte;
 - y permitir consultar el progreso de la tarea.
+
+El sistema busca mostrar cómo un agente de inteligencia artificial puede ir más allá de una interacción directa con un modelo de lenguaje, incorporando planificación, herramientas de investigación y diferentes etapas de procesamiento.
 
 ---
 
@@ -65,12 +68,18 @@ El funcionamiento general del sistema puede representarse de la siguiente manera
                  │                          ▼
                  │                    ┌───────────┐
                  │                    │  Tavily   │
+                 │                    │  arXiv    │
                  │                    └───────────┘
                  │
                  ▼
         ┌─────────────────┐
         │     Ollama      │
         │   Modelo LLM    │
+        └────────┬────────┘
+                 │
+                 ▼
+        ┌─────────────────┐
+        │ Writer / Editor │
         └────────┬────────┘
                  │
                  ▼
@@ -93,8 +102,9 @@ Docker proporciona el entorno de ejecución de la aplicación y PostgreSQL se in
 | **Docker** | Contenerización del sistema |
 | **PostgreSQL** | Persistencia de información |
 | **Ollama** | Ejecución local del modelo de lenguaje |
-| **Qwen** | Modelo de lenguaje utilizado en la configuración local |
+| **Qwen3** | Modelo de lenguaje utilizado en la ejecución local |
 | **Tavily API** | Herramienta de búsqueda para investigación |
+| **arXiv** | Fuente de literatura académica |
 | **HTML / CSS** | Interfaz web |
 | **GitHub** | Control de versiones y entrega del proyecto |
 
@@ -154,23 +164,29 @@ También expone los endpoints utilizados para iniciar y consultar las tareas del
 
 ### `src/agents.py`
 
-Contiene la lógica asociada con los agentes y la interacción con el modelo de lenguaje.
+Contiene la lógica asociada con los diferentes agentes y la interacción con el modelo de lenguaje.
+
+Los agentes permiten separar responsabilidades dentro del proceso de investigación, redacción y revisión del contenido.
 
 ### `src/planning_agent.py`
 
 Implementa la lógica relacionada con la planificación de las tareas que debe realizar el sistema.
 
+A partir de la solicitud del usuario, el sistema puede generar diferentes pasos de investigación antes de comenzar la ejecución.
+
 ### `src/research_tools.py`
 
 Contiene herramientas utilizadas durante la etapa de investigación y recuperación de información.
 
+Estas herramientas permiten complementar las capacidades del modelo de lenguaje mediante fuentes externas.
+
 ### `scripts/test_ollama_connection.py`
 
-Permite realizar pruebas relacionadas con la comunicación con Ollama.
+Permite realizar pruebas relacionadas con la comunicación entre la aplicación y Ollama.
 
 ### `templates/index.html`
 
-Define la interfaz web principal desde la cual el usuario puede interactuar con la aplicación.
+Define la interfaz web principal desde la cual el usuario puede interactuar con la aplicación y observar el progreso de las diferentes etapas.
 
 ### `docker/entrypoint.sh`
 
@@ -182,13 +198,51 @@ Define el entorno Docker del proyecto, instala las dependencias necesarias y con
 
 ---
 
+## Flujo de agentes
+
+Durante una ejecución, el sistema puede dividir una solicitud en diferentes etapas.
+
+En la prueba realizada durante el laboratorio se observó un flujo compuesto por tareas como:
+
+```text
+Solicitud del usuario
+        │
+        ▼
+Planning Agent
+        │
+        ▼
+Generación del plan de investigación
+        │
+        ├───────────────┐
+        ▼               ▼
+Research Agent      Research Agent
+   Tavily               arXiv
+        │               │
+        └───────┬───────┘
+                ▼
+          Writer Agent
+                │
+                ▼
+          Editor Agent
+                │
+                ▼
+          Writer Agent
+                │
+                ▼
+           Reporte final
+```
+
+De esta manera, una sola consulta del usuario puede producir múltiples etapas internas. Esto diferencia el sistema de una interacción convencional en la que simplemente se envía una pregunta directamente al modelo de lenguaje.
+
+---
+
 ## Requisitos
 
 Para ejecutar el proyecto se requiere tener instalado:
 
 - **Docker Desktop**
 - **Ollama**
-- un modelo compatible disponible en Ollama;
+- un modelo compatible disponible localmente en Ollama;
 - una clave válida para **Tavily API**;
 - conexión a Internet para las funcionalidades que utilizan servicios externos.
 
@@ -222,7 +276,9 @@ En su lugar se proporciona:
 
 como plantilla de configuración.
 
-Para ejecutar el proyecto se debe crear una copia de `.env.example`:
+Para ejecutar el proyecto se debe crear una copia de `.env.example`.
+
+En Linux puede realizarse mediante:
 
 ```bash
 cp .env.example .env
@@ -234,9 +290,9 @@ En Windows también puede realizarse manualmente copiando el archivo y cambiando
 .env
 ```
 
-Posteriormente deben configurarse las variables correspondientes, especialmente la clave de Tavily y la configuración del modelo local.
+Posteriormente deben configurarse las variables correspondientes, especialmente la clave de Tavily, el modelo disponible localmente y la dirección utilizada para acceder a Ollama.
 
-> **Importante:** la configuración exacta esperada por el proyecto se encuentra documentada en `.env.example`.
+> **Importante:** `.env.example` constituye una plantilla de referencia. La configuración de `.env` puede variar dependiendo del sistema operativo, los modelos instalados y la forma en que Docker accede al servicio de Ollama.
 
 Nunca se deben publicar claves reales de API en GitHub.
 
@@ -264,7 +320,7 @@ Comprobar que Ollama se encuentra instalado:
 ollama --version
 ```
 
-Consultar los modelos disponibles:
+Consultar los modelos disponibles localmente:
 
 ```bash
 ollama list
@@ -276,17 +332,113 @@ También puede comprobarse que el servidor de Ollama está respondiendo mediante
 curl http://localhost:11434/api/tags
 ```
 
-Si el modelo configurado en el archivo `.env` no está instalado, debe descargarse previamente con Ollama.
+En PowerShell, si `curl` utiliza `Invoke-WebRequest`, también puede utilizarse:
 
-Por ejemplo:
+```powershell
+curl.exe http://localhost:11434/api/tags
+```
+
+El modelo especificado en `.env` debe coincidir con uno de los modelos instalados localmente en Ollama.
+
+En la ejecución realizada para este laboratorio se utilizó:
+
+```text
+qwen3:1.7b
+```
+
+Si este modelo no se encuentra instalado, puede descargarse mediante:
 
 ```bash
-ollama pull qwen3:4b-instruct
+ollama pull qwen3:1.7b
 ```
 
 ---
 
-## 3. Ubicarse en la carpeta del proyecto
+## 3. Configuración utilizada en Windows
+
+Durante la ejecución y validación del laboratorio en Windows se utilizó la siguiente configuración local:
+
+```env
+LLM_MODEL=openai:qwen3:1.7b
+OLLAMA_API_URL=http://host.docker.internal:11434
+OLLAMA_TIMEOUT=300
+TAVILY_API_KEY=TU_API_KEY
+```
+
+La clave:
+
+```text
+TAVILY_API_KEY
+```
+
+debe reemplazarse localmente por una credencial válida del usuario.
+
+### ¿Por qué aparece `openai` si se utiliza Ollama?
+
+Aunque la variable:
+
+```text
+LLM_MODEL=openai:qwen3:1.7b
+```
+
+contiene el prefijo `openai`, el modelo utilizado durante esta configuración se ejecuta **localmente mediante Ollama**.
+
+El proyecto utiliza una interfaz compatible con OpenAI para realizar la comunicación con el servidor local de Ollama.
+
+Por tanto, en esta configuración:
+
+```text
+Aplicación
+    │
+    ▼
+Interfaz compatible con OpenAI
+    │
+    ▼
+Ollama
+    │
+    ▼
+qwen3:1.7b
+```
+
+el modelo sigue ejecutándose localmente.
+
+### Comunicación entre Docker y Ollama en Windows
+
+Ollama se ejecuta en el sistema anfitrión, mientras que la aplicación se ejecuta dentro de Docker.
+
+Por esta razón, dentro del contenedor:
+
+```text
+127.0.0.1
+```
+
+hace referencia al propio contenedor y no necesariamente al computador anfitrión.
+
+En la configuración validada en Windows se utilizó:
+
+```text
+http://host.docker.internal:11434
+```
+
+permitiendo el siguiente flujo:
+
+```text
+Contenedor Docker
+       │
+       │ host.docker.internal:11434
+       ▼
+Windows
+       │
+       ▼
+Ollama
+       │
+       ▼
+qwen3:1.7b
+```
+
+---
+
+## 4. Ubicarse en la carpeta del proyecto
 
 Desde una terminal, ingresar a:
 
@@ -298,7 +450,7 @@ Todos los siguientes comandos deben ejecutarse desde esta carpeta.
 
 ---
 
-## 4. Construir la imagen Docker
+## 5. Construir la imagen Docker
 
 Ejecutar:
 
@@ -314,9 +466,15 @@ Este comando:
 4. configura el script de inicio;
 5. y prepara el entorno necesario para ejecutar el sistema.
 
+La imagen resultante recibe el nombre:
+
+```text
+agentic-ai-v2
+```
+
 ---
 
-## 5. Ejecutar el contenedor
+## 6. Ejecutar el contenedor
 
 En Windows se puede iniciar la aplicación mediante:
 
@@ -342,10 +500,15 @@ carga las variables de entorno requeridas por la aplicación.
 
 Durante el inicio se configura PostgreSQL y posteriormente se ejecuta FastAPI mediante Uvicorn.
 
-Una ejecución correcta debe mostrar finalmente un mensaje similar a:
+Una ejecución correcta debe mostrar mensajes similares a:
 
 ```text
-Uvicorn running on http://0.0.0.0:8000
+Starting Postgres cluster 17/main...
+Postgres is ready
+DATABASE_URL=postgresql://app:local@127.0.0.1:5432/appdb
+
+INFO: Application startup complete.
+INFO: Uvicorn running on http://0.0.0.0:8000
 ```
 
 ---
@@ -358,7 +521,7 @@ Con el contenedor ejecutándose, la interfaz principal puede abrirse desde el na
 http://localhost:8000/
 ```
 
-Desde esta interfaz el usuario puede interactuar con el sistema y solicitar la generación de reportes.
+Desde esta interfaz el usuario puede introducir un tema de investigación y observar las diferentes etapas ejecutadas por el sistema.
 
 ---
 
@@ -384,41 +547,55 @@ Los principales endpoints de la aplicación son:
 
 ---
 
-## Flujo de ejecución
+## Ejemplo de ejecución
 
-El flujo general del sistema es:
+Para comprobar el funcionamiento del agente se puede utilizar una solicitud como:
 
 ```text
-Solicitud del usuario
-        │
-        ▼
-    FastAPI
-        │
-        ▼
-Planificación de la tarea
-        │
-        ▼
-Sistema de agentes
-        │
-   ┌────┴─────┐
-   │          │
-   ▼          ▼
-Ollama    Herramientas
- + LLM    de investigación
-   │          │
-   └────┬─────┘
-        │
-        ▼
-Procesamiento de información
-        │
-        ▼
-Generación del reporte
-        │
-        ▼
-Resultado para el usuario
+Investiga brevemente qué es el entrelazamiento cuántico y genera un resumen corto.
 ```
 
-De esta manera, el modelo de lenguaje no constituye por sí solo toda la aplicación. El sistema incorpora diferentes componentes encargados de coordinar la planificación, investigación, generación de contenido y comunicación con el usuario.
+A partir de la solicitud, el Planning Agent genera automáticamente un conjunto de pasos.
+
+Durante la prueba realizada se observaron etapas correspondientes a:
+
+1. planificación de la investigación;
+2. búsqueda amplia mediante Tavily;
+3. búsqueda de literatura académica mediante arXiv;
+4. síntesis inicial mediante un Writer Agent;
+5. revisión mediante un Editor Agent;
+6. elaboración del reporte;
+7. revisión y generación del resultado final.
+
+Esto permite comprobar la coordinación entre el modelo de lenguaje y las diferentes herramientas disponibles.
+
+---
+
+## ¿Por qué la generación puede tardar?
+
+La generación de un reporte puede tardar más que una conversación convencional con un modelo de lenguaje debido a que el sistema ejecuta múltiples operaciones.
+
+Una consulta puede requerir:
+
+```text
+Planificación
+     +
+Búsquedas externas
+     +
+Procesamiento de resultados
+     +
+Múltiples llamadas al LLM
+     +
+Redacción
+     +
+Revisión
+     +
+Generación del reporte final
+```
+
+Además, el modelo se ejecuta localmente mediante Ollama, por lo que la velocidad depende de los recursos computacionales disponibles en el equipo.
+
+Por esta razón, una tarea de investigación completa puede requerir más tiempo que una respuesta directa de un chatbot.
 
 ---
 
@@ -452,11 +629,11 @@ De manera simplificada:
 │  │      PostgreSQL       │  │
 │  └───────────────────────┘  │
 │                             │
-└─────────────────────────────┘
-             │
-             ▼
-      Ollama / Servicios
-          externos
+└─────────────┬───────────────┘
+              │
+              ▼
+       Ollama / Tavily
+       / fuentes externas
 ```
 
 ---
@@ -519,7 +696,13 @@ agentic-ai-v2
 
 permanece disponible y puede utilizarse nuevamente.
 
-Por lo tanto, no es necesario ejecutar `docker build` cada vez que se inicia el proyecto, salvo que se hayan realizado cambios que requieran reconstruir la imagen.
+Por lo tanto, no es necesario ejecutar:
+
+```bash
+docker build -t agentic-ai-v2 .
+```
+
+cada vez que se inicia el proyecto, salvo que se hayan realizado cambios en el código, dependencias o configuración de construcción que requieran reconstruir la imagen.
 
 ---
 
@@ -544,6 +727,8 @@ La distribución correcta es:
 
 Cada usuario debe proporcionar sus propias credenciales antes de ejecutar el proyecto.
 
+En particular, una clave real de Tavily nunca debe almacenarse públicamente en GitHub.
+
 ---
 
 ## Reproducibilidad
@@ -559,20 +744,42 @@ El procedimiento general en un nuevo equipo es:
         ↓
 3. Instalar/iniciar Ollama
         ↓
-4. Instalar el modelo requerido
+4. Instalar un modelo compatible
         ↓
 5. Crear .env a partir de .env.example
         ↓
-6. Configurar las credenciales
+6. Configurar el modelo y las credenciales
         ↓
 7. Construir la imagen Docker
         ↓
 8. Ejecutar el contenedor
         ↓
-9. Abrir localhost:8000
+9. Abrir http://localhost:8000/
 ```
 
 Esto reduce los problemas asociados con diferencias entre versiones de Python, dependencias y configuraciones locales.
+
+---
+
+## Validación del funcionamiento
+
+Durante la ejecución del laboratorio se verificó el funcionamiento de los principales componentes del sistema.
+
+Se comprobó:
+
+- inicialización correcta del contenedor Docker;
+- inicialización de PostgreSQL;
+- ejecución de FastAPI mediante Uvicorn;
+- acceso a la interfaz web;
+- comunicación entre Docker y Ollama;
+- utilización del modelo local `qwen3:1.7b`;
+- generación automática del plan de investigación;
+- ejecución de búsquedas mediante Tavily;
+- consulta de literatura académica mediante arXiv;
+- ejecución de etapas de escritura;
+- ejecución de etapas de edición y revisión.
+
+Esto permite validar el funcionamiento integrado del sistema y no únicamente el inicio de la API.
 
 ---
 
@@ -581,16 +788,20 @@ Esto reduce los problemas asociados con diferencias entre versiones de Python, d
 El resultado final corresponde a una aplicación de inteligencia artificial con una arquitectura modular que integra:
 
 - agentes especializados;
-- planificación de tareas;
+- planificación automática de tareas;
 - herramientas de investigación;
-- un modelo de lenguaje ejecutado localmente;
-- búsqueda de información mediante servicios externos;
+- recuperación de información externa;
+- consulta de literatura académica;
+- un modelo de lenguaje ejecutado localmente mediante Ollama;
+- agentes de escritura y edición;
 - una API REST desarrollada con FastAPI;
 - una interfaz web;
 - PostgreSQL;
 - y un entorno reproducible mediante Docker.
 
 La implementación permite observar cómo un sistema basado en agentes puede combinar un modelo de lenguaje con herramientas, planificación e infraestructura de software para desarrollar tareas más complejas que una interacción directa con un LLM.
+
+En particular, el sistema puede recibir un tema de investigación, generar un plan, utilizar fuentes externas, procesar la información recuperada y coordinar diferentes agentes para producir un reporte final.
 
 ---
 
@@ -599,3 +810,4 @@ La implementación permite observar cómo un sistema basado en agentes puede com
 **Santiago Ramírez Puentes**  
 Universidad de Antioquia  
 2026
+
